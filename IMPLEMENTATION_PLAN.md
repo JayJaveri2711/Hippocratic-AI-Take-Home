@@ -2,124 +2,143 @@
 
 ## Summary
 
-This project implements a small bedtime story agent for ages 5 to 10. It keeps
-the assignment's required OpenAI model, `gpt-3.5-turbo`, while adding a
-storyteller prompt, structured LLM judge, deterministic safety and quality
-gates, bounded revision loop, safe fallback, debug metadata, and mocked tests.
+This project is a Flask web app for generating bedtime stories for children ages
+5 to 10. The browser UI is the primary user interface. The backend keeps the
+assignment's default `gpt-3.5-turbo` model, offers `gpt-4o-mini` as an optional
+alternate model, uses the OpenAI Responses API, judges generated stories,
+revises weak drafts, and falls back to a known-safe story path when needed.
 
-The assignment `README.md` is intentionally left unchanged. This file documents
-the implementation plan, architecture, and demo flow.
+The code is organized as a small package so the web layer, agent logic, OpenAI
+client, and shared domain types are separate.
 
-## File Layout
+## Current File Layout
 
-- `main.py`: thin command-line wrapper.
-- `story_agent.py`: story pipeline, prompts, judge, revision loop, fallback, and result object.
-- `tests/test_story_agent.py`: mocked unit tests that do not call OpenAI.
-- `requirements.txt`: Python dependency list.
-- `IMPLEMENTATION_PLAN.md`: design notes and block diagram.
+- `main.py`: local development entry point; creates and runs the Flask app.
+- `bedtime_story_agent/web/`: Flask routes, HTML template, and CSS.
+- `bedtime_story_agent/agent/`: story orchestration, scope checks, categories, prompts, and judge logic.
+- `bedtime_story_agent/clients/`: OpenAI Responses API client.
+- `bedtime_story_agent/domain/`: constants, enums, dataclasses, and judge schema.
+- `tests/`: mocked unit tests for the agent and Flask routes.
+- `pyproject.toml`: `uv` project configuration.
+- `requirements.txt`: compatibility dependency list.
 
-## User Flow
+## Current User Flow
 
-1. User provides a story request by CLI argument or interactive input.
-2. The request is checked for clear out-of-scope content.
-3. Mildly risky wording is sanitized, but normal output does not mention it.
-4. The request is categorized into a story mode preset.
-5. The storyteller generates a story candidate.
-6. The judge returns strict JSON.
-7. Python code checks safety first, then quality.
-8. The story is revised up to two times if needed.
-9. If safety still fails, a simple known-safe fallback story is generated and judged once.
-10. If safety cannot be verified, no story is returned.
+1. User opens the Flask web page.
+2. User enters a bedtime story request.
+3. User selects `gpt-3.5-turbo` or `gpt-4o-mini`.
+4. Flask calls `run_story_agent(...)`.
+5. The request is checked for out-of-scope or unsafe content.
+6. Safe requests are categorized into a story mode preset.
+7. The storyteller prompt is sent through the OpenAI Responses API.
+8. The generated story is judged.
+9. If safety and quality pass, the story is rendered.
+10. If quality fails and attempts remain, the story is revised and judged again.
+11. If safety cannot pass after revisions, the fallback story path is tried.
+12. If the fallback also cannot be verified as safe, the app refuses to return a story.
 
 ## Block Diagram
 
 ```mermaid
 flowchart TD
-    A["User request"] --> B["main.py: CLI arg or input()"]
-    B --> C["scope_check_request()"]
-    C --> D{"Clearly unsafe or out of scope?"}
-    D -- "Yes" --> E["Return refused_scope, story=None"]
-    D -- "No" --> F["Use original or sanitized request"]
+    A["Browser form<br/>Collects the story request, model choice, and debug option"] --> B["web/app.py<br/>Receives the form submission and calls the agent"]
+    B --> C["agent/story_agent.py<br/>Coordinates scope, generation, judging, revision, and fallback"]
 
-    F --> G["categorize_request() + story mode preset"]
-    G --> H["build_story_prompt()"]
-    H --> I["call_model(prompt): gpt-3.5-turbo"]
-    I --> J["Story candidate"]
-    J --> K["judge_story(candidate)"]
+    C --> D["agent/scope.py<br/>Rejects clearly unsafe requests and softens mild risk"]
+    D --> E{"Allowed?<br/>Decides whether the request can become a bedtime story"}
+    E -- "No" --> F["StoryResult REFUSED_SCOPE<br/>Returns a safe refusal without calling the model"]
+    F --> Z["Render result page<br/>Shows story, warning, error, or debug metadata"]
 
-    K --> L{"Judge parsed after retry?"}
-    L -- "No" --> M["Fail closed: failed_judge, story=None"]
-    L -- "Yes" --> N{"Safety gates pass?"}
+    E -- "Yes" --> G["agent/categories.py<br/>Matches keywords to a story mode preset"]
+    G --> H["agent/prompts.py<br/>Builds the storyteller prompt with safety rules"]
+    H --> I["clients/openai_client.py<br/>Calls the Responses API to draft the story"]
+    I --> J["Candidate story<br/>The model's first or revised story draft"]
 
-    N -- "Yes" --> O{"Quality threshold met?"}
-    O -- "Yes" --> P["Return final story"]
-    O -- "No" --> Q{"Revision attempts left?"}
-    Q -- "Yes" --> R["build_revision_prompt(story + judge feedback)"]
+    J --> K["agent/judge.py<br/>Scores the story for safety, quality, and request fit"]
+    K --> L{"Judge parsed?<br/>Confirms the judge returned usable JSON"}
+    L -- "No" --> M["StoryResult FAILED_JUDGE<br/>Fails closed because safety cannot be verified"]
+    M --> Z
+
+    L -- "Yes" --> N{"Safety passed?<br/>Requires all safety fields to be true"}
+    N -- "Yes" --> O{"Quality passed?<br/>Checks story arc, length, request fit, and scores"}
+    O -- "Yes" --> P["StoryResult PASSED<br/>Returns the verified story"]
+    P --> Z
+
+    O -- "No" --> Q{"Revision attempts left?<br/>Limits retries so the app cannot loop forever"}
+    N -- "No" --> Q
+    Q -- "Yes" --> R["agent/prompts.py<br/>Builds revision instructions from judge feedback"]
     R --> I
-    Q -- "No" --> S["Return best safe story with warning"]
 
-    N -- "No" --> T{"Revision attempts left?"}
-    T -- "Yes" --> R
-    T -- "No" --> U["build_fallback_prompt()"]
-    U --> V["call_model(prompt): gpt-3.5-turbo"]
-    V --> W["Fallback story"]
-    W --> X["judge_story(fallback)"]
-    X --> Y{"Fallback judge parsed and safety passes?"}
-    Y -- "Yes" --> Z["Return fallback story"]
-    Y -- "No" --> AA["Refuse: could not verify safe story"]
+    Q -- "No, safe story exists" --> S["StoryResult COMPLETED_WITH_WARNINGS<br/>Returns the best safe draft with a quality warning"]
+    S --> Z
+
+    Q -- "No safe story" --> T["agent/prompts.py<br/>Builds a known-safe fallback story prompt"]
+    T --> U["clients/openai_client.py<br/>Calls the Responses API for the fallback story"]
+    U --> V["Fallback story<br/>A simpler safe story independent of risky details"]
+    V --> W["agent/judge.py<br/>Judges the fallback before it can be shown"]
+    W --> X{"Fallback safe?<br/>Final safety gate before returning fallback"}
+    X -- "Yes" --> Y["StoryResult PASSED + used_fallback<br/>Returns the verified fallback story"]
+    X -- "No" --> AA["StoryResult REFUSED_SAFETY<br/>Refuses because no safe story was verified"]
+    Y --> Z
+    AA --> Z
 ```
 
 ## Safety and Quality Policy
 
-Scope rejection is conservative. The tool accepts weird but harmless prompts,
-such as a ninja robot in space. It refuses only clearly incompatible requests:
+Scope rejection is conservative. The app accepts weird but harmless prompts,
+such as a ninja robot in space. It refuses clearly incompatible requests:
 violent horror, sexual content, medical advice, crime concealment, or dangerous
-instructions. Mild risk is sanitized instead of refused.
+instructions. Mild risk can be sanitized instead of refused.
 
-The judge returns strict JSON:
+The judge checks:
 
-```json
-{
-  "age_appropriate": true,
-  "safe_for_bedtime": true,
-  "no_unsafe_content": true,
-  "follows_request": true,
-  "has_story_arc": true,
-  "appropriate_length": true,
-  "language_score": 4,
-  "creativity_score": 4,
-  "bedtime_score": 5,
-  "overall_score": 4.3,
-  "issues": [],
-  "revision_instructions": "Make the ending warmer and calmer."
-}
-```
+- Safety: `age_appropriate`, `safe_for_bedtime`, `no_unsafe_content`
+- Quality: `follows_request`, `has_story_arc`, `appropriate_length`
+- Scores: `language_score`, `creativity_score`, `bedtime_score`, `overall_score`
 
-Python computes pass/fail deterministically:
+Safety must pass before any story is returned. Quality must meet threshold for a
+clean pass. If the judge response cannot be parsed after retry, the system fails
+closed.
 
-- Safety passes only when `age_appropriate`, `safe_for_bedtime`, and
-  `no_unsafe_content` are all true.
-- Quality passes only when `follows_request`, `has_story_arc`, and
-  `appropriate_length` are true, all numeric scores are at least 4, and
-  `overall_score` is at least 4.
-- The judge's prose is used only for revision guidance.
-- If judge JSON is invalid, the judge is retried once with stricter JSON-only
-  instructions. If that still fails, the system fails closed.
+## Model and Judge Behavior
 
-## Story Mode Presets
+- `gpt-3.5-turbo` remains the default model.
+- `gpt-4o-mini` is available from the web UI as an alternate.
+- All OpenAI calls go through the Responses API.
+- The judge uses structured-output schema formatting for models listed in
+  `STRUCTURED_OUTPUT_MODELS`.
+- The default model keeps the strict JSON parse/retry path for compatibility.
 
-- `calming_bedtime`: slower pacing, soft imagery, peaceful ending.
-- `friendship`: conflict-resolution arc.
-- `learning`: one gentle concept learned through action.
-- `adventure`: exciting but non-scary, with a calm return.
-- `general`: classic bedtime beginning, middle, and end.
+## Redundancy Review
+
+The current codebase is reasonably separated, but a few redundancies remain:
+
+- `pyproject.toml` and `requirements.txt` both list dependencies. This is
+  intentional for now: `uv` is the documented path, while `requirements.txt`
+  remains a compatibility fallback.
+- `README.md` and this file both describe setup and architecture. This is useful
+  for a takehome, but the README should remain the source for user instructions
+  and this file should remain the source for design explanation.
+- Model validation happens in both `web/app.py` and `agent/story_agent.py`. This
+  is defensive: the web layer protects form input, while the agent protects
+  direct Python calls and tests.
+- Judge schema constraints and `parse_judgment(...)` validation overlap. This is
+  intentional because structured outputs are only used for selected models; the
+  parser still protects the strict JSON fallback path.
+- `run_story_agent(debug=...)` accepts `debug` but does not branch on it. The
+  agent always collects debug metadata, and the web layer decides whether to
+  render it.
+
+No duplicate story-generation pipeline remains after the package split. The CLI
+input path has been removed from the main user flow, and the previously unused
+`is_good_enough(...)` helper was removed.
 
 ## Usage
 
 Install dependencies:
 
 ```powershell
-pip install -r requirements.txt
+uv sync
 ```
 
 Set the API key:
@@ -128,37 +147,27 @@ Set the API key:
 $env:OPENAI_API_KEY="your-key-here"
 ```
 
-Run:
+Run the app:
 
 ```powershell
-python main.py "Tell me a bedtime story about a sleepy dragon"
-python main.py --debug "Tell me a spooky story about a dragon in a scary forest"
-python main.py
+uv run python main.py
 ```
 
-Normal output shows only the story or a refusal/error. Debug output includes
-status, attempts, warnings, final judgment, sanitization metadata, and attempt
-history.
+Open the local Flask URL, usually `http://127.0.0.1:5000`.
 
 ## Tests
 
 Run:
 
 ```powershell
-python -m unittest discover -s tests
+uv run python -m unittest discover -s tests
 ```
 
-The tests use a mocked model client and never require `OPENAI_API_KEY`.
+The tests use mocked model clients and do not require `OPENAI_API_KEY`.
 
+## Future Improvements
 
-## Future Improvements Given More Time
-
-Given more time, I would expand this project from a simple command-line bedtime story generator into a richer interactive storytelling platform for children and parents.
-
-One feature I would love to add is image generation. Children are often most engaged by pictures, colors, and visual characters, so generating a simple illustration or cover image alongside each story could make the experience feel much more magical. For example, after the story is generated and judged as safe, the system could create a child-friendly image prompt describing the main character, setting, and mood of the story. A future version could then use an image generation model to produce a cozy bedtime illustration. This would make the tool feel less like a text generator and more like a personalized picture book.
-
-I would also turn the project into a small hosted chat platform instead of only a CLI script. A web-based interface would let a parent or child ask for changes, such as “make it funnier,” “make the dragon smaller,” or “add my dog into the story.” The same judge-and-revision loop could run behind the scenes after every interaction to make sure the story remains age-appropriate, calming, and high quality.
-
-Another future direction would be improving the storyteller model’s style. With access to properly licensed or public-domain children’s books, I would experiment with training or fine-tuning on a small curated subset of high-quality bedtime stories. The goal would not be to copy existing books, but to help the model better learn pacing, tone, vocabulary, story arcs, and the kind of gentle emotional resolution that works well for ages 5 to 10.
-
-Finally, I would add more personalization. Parents could specify preferences like story length, reading level, recurring characters, moral lessons, or themes to avoid. Over time, the system could remember which kinds of stories a child enjoys and generate safer, warmer, and more engaging bedtime stories tailored to them.
+Given more time, the next useful product improvements would be parent-facing
+controls for story length, reading level, theme preferences, and follow-up
+revision requests. A later version could also generate a safe illustration
+prompt after the story passes the judge.

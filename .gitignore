@@ -15,3 +15,5 @@ env/
 .ruff_cache/
 
 *.log
+
+api key.txt

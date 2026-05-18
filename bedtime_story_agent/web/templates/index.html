@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bedtime Story Agent</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">Safe story generator</p>
+        <h1 id="page-title">Bedtime Story Agent</h1>
+        <p class="lede">Create a judged bedtime story for ages 5 to 10.</p>
+      </section>
+
+      <section class="workspace" aria-label="Story generator">
+        <form class="story-form" method="post">
+          <label for="request">Story request</label>
+          <textarea
+            id="request"
+            name="request"
+            rows="7"
+            placeholder="Tell me a bedtime story about a sleepy dragon who learns to share the moon."
+            required
+          >{{ request_text }}</textarea>
+
+          <div class="controls">
+            <div class="field">
+              <label for="model">Model</label>
+              <select id="model" name="model">
+                {% for model in supported_models %}
+                  <option value="{{ model }}" {% if model == selected_model %}selected{% endif %}>
+                    {{ model }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <label class="check">
+              <input type="checkbox" name="debug" {% if debug %}checked{% endif %}>
+              <span>Show debug details</span>
+            </label>
+          </div>
+
+          <button type="submit">Generate Story</button>
+        </form>
+
+        {% if result %}
+          <section class="result" aria-live="polite">
+            <div class="result-header">
+              <p class="eyebrow">Status</p>
+              <strong>{{ status_label }}</strong>
+            </div>
+
+            {% if warnings %}
+              <div class="notice" role="status">
+                {% for warning in warnings %}
+                  <p>{{ warning }}</p>
+                {% endfor %}
+              </div>
+            {% endif %}
+
+            {% if result.story %}
+              <article class="story-output">
+                {{ result.story | replace("\n", "<br>") | safe }}
+              </article>
+            {% else %}
+              <div class="empty-result">
+                {{ result.error or "No story was returned." }}
+              </div>
+            {% endif %}
+
+            {% if debug %}
+              <details class="debug-panel" open>
+                <summary>Debug details</summary>
+                {% if final_judgment_json %}
+                  <h2>Final judgment</h2>
+                  <pre>{{ final_judgment_json }}</pre>
+                {% endif %}
+                {% if debug_info_json %}
+                  <h2>Metadata</h2>
+                  <pre>{{ debug_info_json }}</pre>
+                {% endif %}
+              </details>
+            {% endif %}
+          </section>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,50 +1,106 @@
-# Hippocratic AI Coding Assignment
-Welcome to the [Hippocratic AI](https://www.hippocraticai.com) coding assignment
+# Bedtime Story Agent
 
-## Instructions
-The attached code is a simple python script skeleton. Your goal is to take any simple bedtime story request and use prompting to tell a story appropriate for ages 5 to 10.
-- Incorporate a LLM judge to improve the quality of the story
-- Provide a block diagram of the system you create that illustrates the flow of the prompts and the interaction between judge, storyteller, user, and any other components you add
-- Do not change the openAI model that is being used. 
-- Please use your own openAI key, but do not include it in your final submission.
-- Otherwise, you may change any code you like or add any files
+A small Flask web app that generates bedtime stories for children ages 5 to 10.
+The app uses a storyteller prompt, an LLM judge, deterministic safety and
+quality gates, bounded revisions, and a safe fallback path.
 
----
+The default model remains `gpt-3.5-turbo` to respect the original assignment
+constraint. The web UI also offers `gpt-4o-mini` as an alternate model; newer
+models can use the structured-output judge path more reliably, while the
+default model keeps a strict JSON parsing fallback.
 
-## Rules
-- This assignment is open-ended
-- You may use any resources you like with the following restrictions
-   - They must be resources that would be available to you if you worked here (so no other humans, no closed AIs, no unlicensed code, etc.)
-   - Allowed resources include but not limited to Stack overflow, random blogs, chatGPT et al
-   - You have to be able to explain how the code works, even if chatGPT wrote it
-- DO NOT PUSH THE API KEY TO GITHUB. OpenAI will automatically delete it
+## Setup
 
----
+Install dependencies with `uv`:
 
-## What does "tell a story" mean?
-It should be appropriate for ages 5-10. Other than that it's up to you. Here are some ideas to help get the brain-juices flowing!
-- Use story arcs to tell better stories
-- Allow the user to provide feedback or request changes
-- Categorize the request and use a tailored generation strategy for each category
+```powershell
+uv sync
+```
 
----
+Set your OpenAI API key:
 
-## How will I be evaluated
-Good question. We want to know the following:
-- The efficacy of the system you design to create a good story
-- Are you comfortable using and writing a python script
-- What kinds of prompting strategies and agent design strategies do you use
-- Are the stories your tool creates good?
-- Can you understand and deconstruct a problem
-- Can you operate in an open-ended environment
-- Can you surprise us
+```powershell
+$env:OPENAI_API_KEY="your-key-here"
+```
 
----
+Run the web app:
 
-## Other FAQs
-- How long should I spend on this? 
-No more than 2-3 hours
-- Can I change what the input is? 
-Sure
-- How long should the story be?
-You decide
+```powershell
+uv run python main.py
+```
+
+Open the local URL shown by Flask, usually:
+
+```text
+http://127.0.0.1:5000
+```
+
+## Usage
+
+1. Enter a bedtime story request in the browser form.
+2. Choose `gpt-3.5-turbo` or `gpt-4o-mini`.
+3. Submit the form.
+4. Read the generated story, warnings, and optional debug details.
+
+The browser UI is the primary interaction path. `main.py` starts the Flask app;
+the project no longer asks for user story input through `input()` or positional
+CLI arguments.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A["Browser form"] --> B["Flask app route"]
+    B --> C["run_story_agent()"]
+    C --> D["scope_check_request()"]
+    D --> E{"Allowed?"}
+    E -- "No" --> F["Return refused_scope"]
+    E -- "Yes" --> G["categorize_request()"]
+    G --> H["build_story_prompt()"]
+    H --> I["OpenAI Responses API: storyteller"]
+    I --> J["Candidate story"]
+    J --> K["OpenAI Responses API: judge"]
+    K --> L{"Judge parsed?"}
+    L -- "No" --> M["Fail closed"]
+    L -- "Yes" --> N{"Safety and quality pass?"}
+    N -- "Yes" --> O["Render story"]
+    N -- "No, attempts left" --> P["build_revision_prompt()"]
+    P --> I
+    N -- "No attempts left" --> Q["Fallback prompt"]
+    Q --> I
+```
+
+## Code Layout
+
+- `main.py`: starts the Flask web app.
+- `bedtime_story_agent/web/`: Flask routes, templates, and CSS.
+- `bedtime_story_agent/agent/`: story orchestration, prompts, categories, judge, and scope checks.
+- `bedtime_story_agent/clients/`: external service clients, currently OpenAI.
+- `bedtime_story_agent/domain/`: constants, enums, dataclasses, and judge schema.
+- `tests/`: mocked unit tests.
+
+## Safety and Quality Policy
+
+The app accepts weird but harmless prompts, such as a ninja robot in space. It
+refuses clearly incompatible requests such as violent horror, sexual content,
+medical advice, crime concealment, or dangerous instructions. Mildly risky
+wording can be softened before generation.
+
+The judge checks:
+
+- safety fields: `age_appropriate`, `safe_for_bedtime`, `no_unsafe_content`
+- quality fields: `follows_request`, `has_story_arc`, `appropriate_length`
+- numeric scores: `language_score`, `creativity_score`, `bedtime_score`, `overall_score`
+
+If safety cannot be verified, the app fails closed and does not return the
+story.
+
+## Tests
+
+Run the test suite:
+
+```powershell
+uv run python -m unittest discover -s tests
+```
+
+The tests use mocked model clients and do not require `OPENAI_API_KEY`.
