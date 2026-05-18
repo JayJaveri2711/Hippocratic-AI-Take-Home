@@ -166,8 +166,8 @@ uv run python -m unittest discover -s tests
 The tests use mocked model clients and do not require `OPENAI_API_KEY`.
 
 ## Future Improvements
+Given more time, the next useful product improvements would focus on making the system more usable for parents while preserving the safety-first design. Parents could be given controls for story length, reading level, theme preferences, and tone, allowing them to request a short calming bedtime story, a more adventurous story, or a version appropriate for a specific age range. These controls would make the product feel less like a one-shot generator and more like a flexible storytelling assistant that can adapt to different children, routines, and family preferences.
 
-Given more time, the next useful product improvements would be parent-facing
-controls for story length, reading level, theme preferences, and follow-up
-revision requests. A later version could also generate a safe illustration
-prompt after the story passes the judge.
+Another important improvement would be support for follow-up revision requests. For example, after receiving a story, a parent might ask for it to be made shorter, less scary, more humorous, more educational, or more focused on a specific moral lesson. These revisions should still pass through the same judge pipeline rather than bypassing safety checks, since a safe first draft could become unsafe or lower quality after edits. This would extend the current storyteller-judge loop into a more interactive product workflow.
+
+A later version could also generate a safe illustration prompt after the story passes the judge. Instead of directly generating an image from the original user request, the system would first validate the story and then produce an image prompt based only on the approved story content. This would reduce the risk of unsafe or inappropriate visual content while enabling a richer bedtime experience. Over time, the system could also store lightweight parent preferences, such as preferred story length or recurring themes, so repeat usage feels more personalized without compromising safety.
